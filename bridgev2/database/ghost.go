@@ -112,6 +112,7 @@ const (
 		                 identifiers=$11, extra_profile=$12, metadata=$13
 		WHERE bridge_id=$1 AND id=$2
 	`
+	deleteGhostQuery = `DELETE FROM ghost WHERE bridge_id=$1 AND id=$2`
 )
 
 func (gq *GhostQuery) GetByID(ctx context.Context, id networkid.UserID) (*Ghost, error) {
@@ -132,6 +133,10 @@ func (gq *GhostQuery) Insert(ctx context.Context, ghost *Ghost) error {
 func (gq *GhostQuery) Update(ctx context.Context, ghost *Ghost) error {
 	ensureBridgeIDMatches(&ghost.BridgeID, gq.BridgeID)
 	return gq.Exec(ctx, updateGhostQuery, ghost.ensureHasMetadata(gq.MetaType).sqlVariables()...)
+}
+
+func (gq *GhostQuery) Delete(ctx context.Context, id networkid.UserID) error {
+	return gq.Exec(ctx, deleteGhostQuery, gq.BridgeID, id)
 }
 
 func (g *Ghost) Scan(row dbutil.Scannable) (*Ghost, error) {

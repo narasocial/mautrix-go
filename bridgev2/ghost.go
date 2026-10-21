@@ -110,6 +110,20 @@ func (br *Bridge) GetExistingGhostByID(ctx context.Context, id networkid.UserID)
 	return br.unlockedGetGhostByID(ctx, id, true)
 }
 
+// DeleteGhost deletes a ghost's row and drops it from the cache, so the bridge forgets the remote
+// user's name, avatar and identifiers. It doesn't touch the ghost's Matrix user. If the remote user
+// shows up again, GetGhostByID makes a new ghost, which fetches their info afresh.
+func (br *Bridge) DeleteGhost(ctx context.Context, id networkid.UserID) error {
+	br.cacheLock.Lock()
+	defer br.cacheLock.Unlock()
+	err := br.DB.Ghost.Delete(ctx, id)
+	if err != nil {
+		return err
+	}
+	delete(br.ghostsByID, id)
+	return nil
+}
+
 type Avatar struct {
 	ID     networkid.AvatarID
 	Get    func(ctx context.Context) ([]byte, error)
