@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"time"
 
@@ -600,7 +601,16 @@ func (portal *Portal) sendLegacyBackfill(ctx context.Context, source *UserLogin,
 				Time("message_ts", msg.Timestamp)
 		}, true)
 		if !res.Success {
-			return res.Error
+			if !isRefusedByHomeserver(res.Error) {
+				return res.Error
+			}
+			// One message the homeserver won't take (like one over the 64 KiB event size limit)
+			// shouldn't cost the rest of the chat's history, so skip it and keep going.
+			zerolog.Ctx(ctx).Warn().Err(res.Error).
+				Str("message_id", string(msg.ID)).
+				Any("sender_id", msg.Sender).
+				Time("message_ts", msg.Timestamp).
+				Msg("Homeserver refused backfill message, skipping it")
 		}
 		if len(dbMessages) > 0 {
 			lastPart = dbMessages[len(dbMessages)-1].MXID
@@ -647,4 +657,31 @@ func (portal *Portal) sendLegacyBackfill(ctx context.Context, source *UserLogin,
 		}
 	}
 	return nil
+}
+
+// isRefusedByHomeserver reports whether err only consists of the homeserver refusing the event itself
+// with a 4xx response (like M_TOO_LARGE), which doesn't stop the next message from being sent.
+// Database errors, cancelled contexts, invalid tokens and rate limits aren't refusals.
+func isRefusedByHomeserver(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := joined.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !isRefusedByHomeserver(e) {
+				return false
+			}
+		}
+		return true
+	}
+	httpErr, ok := errors.AsType[mautrix.HTTPError](err)
+	if !ok || httpErr.Response == nil {
+		return false
+	}
+	code := httpErr.Response.StatusCode
+	return code >= 400 && code < 500 && code != http.StatusUnauthorized && code != http.StatusTooManyRequests
 }
