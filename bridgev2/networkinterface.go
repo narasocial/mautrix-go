@@ -1373,6 +1373,15 @@ type RemoteReactionWithExtraContent interface {
 	GetReactionExtraContent() map[string]any
 }
 
+// RemoteReactionToUnknownTarget is a reaction, or its removal, that may have something to send when
+// its target isn't in the bridge's database: a message from before the login was linked again, whose
+// rows its logout deleted, or a reaction the bridge never had. GetUnknownTargetEvent returns the event
+// to send in the portal instead (its type and raw content), or nil content to send nothing.
+type RemoteReactionToUnknownTarget interface {
+	RemoteEvent
+	GetUnknownTargetEvent() (event.Type, map[string]any)
+}
+
 type RemoteReactionWithMeta interface {
 	RemoteReaction
 	GetReactionDBMetadata() any

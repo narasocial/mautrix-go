@@ -3673,6 +3673,29 @@ func (portal *Portal) handleRemoteReactionSync(ctx context.Context, source *User
 	return EventHandlingResultSuccess
 }
 
+// sendUnknownTargetEvent sends what a reaction or its removal whose target the bridge doesn't have
+// says to send instead (RemoteReactionToUnknownTarget), and ignores it otherwise.
+func (portal *Portal) sendUnknownTargetEvent(ctx context.Context, source *UserLogin, evt RemoteEvent, typ RemoteEventType) EventHandlingResult {
+	provider, ok := evt.(RemoteReactionToUnknownTarget)
+	if !ok {
+		return EventHandlingResultIgnored
+	}
+	evtType, content := provider.GetUnknownTargetEvent()
+	if content == nil {
+		return EventHandlingResultIgnored
+	}
+	intent, ok := portal.GetIntentFor(ctx, evt.GetSender(), source, typ)
+	if !ok {
+		return EventHandlingResultFailed.WithError(ErrFailedToGetIntent)
+	}
+	_, err := intent.SendMessage(ctx, portal.MXID, evtType, &event.Content{Raw: content}, &MatrixSendExtra{Timestamp: getEventTS(evt)})
+	if err != nil {
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to send event for reaction with unknown target")
+		return EventHandlingResultFailed.WithError(err)
+	}
+	return EventHandlingResultSuccess
+}
+
 func (portal *Portal) handleRemoteReaction(ctx context.Context, source *UserLogin, evt RemoteReaction) EventHandlingResult {
 	log := zerolog.Ctx(ctx)
 	targetMessage, err := portal.getTargetMessagePart(ctx, source, evt)
@@ -3682,7 +3705,7 @@ func (portal *Portal) handleRemoteReaction(ctx context.Context, source *UserLogi
 	} else if targetMessage == nil {
 		// TODO use deterministic event ID as target if applicable?
 		log.Warn().Msg("Target message for reaction not found")
-		return EventHandlingResultIgnored
+		return portal.sendUnknownTargetEvent(ctx, source, evt, RemoteEventReaction)
 	}
 	emoji, emojiID := evt.GetReactionEmoji()
 	existingReaction, err := portal.Bridge.DB.Reaction.GetByID(ctx, portal.Receiver, targetMessage.ID, targetMessage.PartID, evt.GetSender().Sender, emojiID)
@@ -3798,7 +3821,7 @@ func (portal *Portal) handleRemoteReactionRemove(ctx context.Context, source *Us
 		return EventHandlingResultFailed.WithError(err)
 	} else if targetReaction == nil {
 		log.Warn().Msg("Target reaction not found")
-		return EventHandlingResultIgnored
+		return portal.sendUnknownTargetEvent(ctx, source, evt, RemoteEventReactionRemove)
 	}
 	intent, err := portal.getIntentForMXID(ctx, targetReaction.SenderMXID)
 	if err != nil {
